@@ -1,0 +1,23 @@
+{
+  "name": "bale-gold-bot",
+  "version": "1.0.0",
+  "description": "Bale bot for real-time gold, coin and currency prices",
+  "main": "src/bot.js",
+  "scripts": {
+    "start": "node src/bot.js"
+  },
+  "keywords": [
+    "bale",
+    "bot",
+    "gold",
+    "currency",
+    "crypto"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "axios": "^1.20.0",
+    "dotenv": "^17.4.2"
+  }
+}
