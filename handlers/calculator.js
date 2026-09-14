@@ -1,5 +1,4 @@
-const axios = require("axios");
-const { brsApiKey, brsApiUrl } = require("../config");
+const { getMarketData } = require("../services/market.service");
 
 const calculatorSessions = new Map();
 
@@ -23,25 +22,42 @@ function parseWeight(value) {
   return weight;
 }
 
-async function getGoldPrice(symbol) {
-  const response = await axios.get(brsApiUrl, {
-    params: {
-      key: brsApiKey,
-    },
-    timeout: 10000,
-  });
+function getCalculatorKeyboard() {
+  return {
+    keyboard: [[{ text: "❌ لغو محاسبه" }]],
+    resize_keyboard: true,
+    one_time_keyboard: false,
+  };
+}
 
-  const item = response.data.gold?.find((gold) => gold.symbol === symbol);
+function getKaratKeyboard() {
+  return {
+    keyboard: [
+      [{ text: "🥇 18 عیار" }, { text: "💎 24 عیار" }],
+      [{ text: "❌ لغو محاسبه" }],
+    ],
+    resize_keyboard: true,
+    one_time_keyboard: false,
+  };
+}
 
-  if (!item) {
-    throw new Error("Gold price not found");
-  }
-
-  return item;
+function getMainKeyboard() {
+  return {
+    keyboard: [
+      [{ text: "🥇 قیمت طلا" }, { text: "🪙 قیمت سکه" }],
+      [{ text: "💵 قیمت ارز" }],
+      [{ text: "📊 وضعیت بازار" }, { text: "🤖 تحلیل هوشمند بازار" }],
+      [{ text: "🧮 محاسبه قیمت طلا" }],
+      [{ text: "🔔 هشدار قیمت" }, { text: "📅 تاریخچه قیمت" }],
+      [{ text: "🔄 بروزرسانی قیمت‌ها" }],
+    ],
+    resize_keyboard: true,
+    is_persistent: true,
+  };
 }
 
 async function startCalculator(bot, chatId) {
-  calculatorSessions.set(chatId, {
+  calculatorSessions.set(String(chatId), {
     step: "weight",
   });
 
@@ -56,28 +72,36 @@ async function startCalculator(bot, chatId) {
 5.25
 
 می‌توانید عدد را به فارسی یا انگلیسی وارد کنید.
+
+برای لغو عملیات، دکمه زیر را بزنید.
 `,
+    {
+      reply_markup: getCalculatorKeyboard(),
+    },
   );
 }
 
 async function handleCalculator(bot, message) {
   const chatId = message.chat.id;
+  const chatKey = String(chatId);
   const text = message.text?.trim();
 
   if (!text) {
     return false;
   }
 
-  const session = calculatorSessions.get(chatId);
+  const session = calculatorSessions.get(chatKey);
 
   if (!session) {
     return false;
   }
 
-  if (text === "❌ لغو محاسبه") {
-    calculatorSessions.delete(chatId);
+  if (text === "❌ لغو محاسبه" || text === "لغو" || text === "/cancel") {
+    calculatorSessions.delete(chatKey);
 
-    await bot.sendMessage(chatId, "❌ محاسبه قیمت طلا لغو شد.");
+    await bot.sendMessage(chatId, "❌ محاسبه قیمت طلا لغو شد.", {
+      reply_markup: getMainKeyboard(),
+    });
 
     return true;
   }
@@ -89,6 +113,9 @@ async function handleCalculator(bot, message) {
       await bot.sendMessage(
         chatId,
         "❌ وزن واردشده معتبر نیست.\n\nلطفاً وزن را به گرم وارد کنید.\nمثال: 5.25",
+        {
+          reply_markup: getCalculatorKeyboard(),
+        },
       );
 
       return true;
@@ -97,16 +124,7 @@ async function handleCalculator(bot, message) {
     session.weight = weight;
     session.step = "karat";
 
-    calculatorSessions.set(chatId, session);
-
-    const keyboard = {
-      keyboard: [
-        [{ text: "🥇 18 عیار" }, { text: "💎 24 عیار" }],
-        [{ text: "❌ لغو محاسبه" }],
-      ],
-      resize_keyboard: true,
-      one_time_keyboard: true,
-    };
+    calculatorSessions.set(chatKey, session);
 
     await bot.sendMessage(
       chatId,
@@ -118,7 +136,7 @@ ${formatNumber(weight)} گرم
 💎 حالا عیار طلا را انتخاب کنید:
 `,
       {
-        reply_markup: keyboard,
+        reply_markup: getKaratKeyboard(),
       },
     );
 
@@ -138,7 +156,10 @@ ${formatNumber(weight)} گرم
     } else {
       await bot.sendMessage(
         chatId,
-        "لطفاً یکی از گزینه‌های عیار را انتخاب کنید.",
+        "❌ لطفاً یکی از گزینه‌های عیار را انتخاب کنید.",
+        {
+          reply_markup: getKaratKeyboard(),
+        },
       );
 
       return true;
@@ -147,21 +168,32 @@ ${formatNumber(weight)} گرم
     await bot.sendMessage(chatId, "⏳ در حال دریافت قیمت لحظه‌ای طلا...");
 
     try {
-      const gold = await getGoldPrice(symbol);
-      const totalPrice = session.weight * Number(gold.price);
+      const data = await getMarketData();
 
-      calculatorSessions.delete(chatId);
+      const gold = [...(data.gold || [])].find(
+        (item) => item.symbol === symbol,
+      );
 
-      const keyboard = {
-        keyboard: [
-          [{ text: "🥇 قیمت طلا" }, { text: "🪙 قیمت سکه" }],
-          [{ text: "💵 قیمت ارز" }],
-          [{ text: "📊 وضعیت بازار" }],
-          [{ text: "🧮 محاسبه قیمت طلا" }],
-          [{ text: "🔄 بروزرسانی قیمت‌ها" }],
-        ],
-        resize_keyboard: true,
-      };
+      if (!gold) {
+        throw new Error("Gold price not found");
+      }
+
+      const goldPrice = Number(gold.price);
+
+      if (!Number.isFinite(goldPrice) || goldPrice <= 0) {
+        throw new Error("Invalid gold price");
+      }
+
+      const totalPrice = session.weight * goldPrice;
+
+      calculatorSessions.delete(chatKey);
+
+      const changePercent = Number(gold.change_percent) || 0;
+
+      const changeIcon =
+        changePercent > 0 ? "🟢" : changePercent < 0 ? "🔴" : "⚪";
+
+      const changeSign = changePercent > 0 ? "+" : "";
 
       const result = `
 🧮 محاسبه قیمت طلا
@@ -173,7 +205,7 @@ ${formatNumber(session.weight)} گرم
 ${karat} عیار
 
 💰 قیمت هر گرم:
-${formatNumber(gold.price)} ${gold.unit}
+${formatNumber(goldPrice)} ${gold.unit || "تومان"}
 
 ━━━━━━━━━━━━
 
@@ -181,26 +213,29 @@ ${formatNumber(gold.price)} ${gold.unit}
 ${formatNumber(totalPrice)} تومان
 
 📊 تغییر قیمت:
-${gold.change_percent > 0 ? "🟢" : gold.change_percent < 0 ? "🔴" : "⚪"} ${gold.change_percent > 0 ? "+" : ""}${gold.change_percent}٪
+${changeIcon} ${changeSign}${changePercent}٪
 
 🕐 آخرین بروزرسانی:
 ${gold.date || "-"} | ${gold.time || "-"}
 `;
 
       await bot.sendMessage(chatId, result, {
-        reply_markup: keyboard,
+        reply_markup: getMainKeyboard(),
       });
     } catch (error) {
-      calculatorSessions.delete(chatId);
+      calculatorSessions.delete(chatKey);
 
       console.error(
-        "Gold calculator API error:",
+        "Gold calculator error:",
         error.response?.data || error.message,
       );
 
       await bot.sendMessage(
         chatId,
         "❌ دریافت قیمت طلا با خطا مواجه شد.\nلطفاً چند لحظه دیگر دوباره تلاش کنید.",
+        {
+          reply_markup: getMainKeyboard(),
+        },
       );
     }
 

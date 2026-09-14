@@ -5,6 +5,8 @@ const { checkAlerts } = require("./alert.service");
 let monitorInterval = null;
 let isRunning = false;
 
+const DEFAULT_INTERVAL = 10 * 60 * 1000;
+
 async function updateMarket(bot) {
   if (isRunning) {
     return;
@@ -13,12 +15,13 @@ async function updateMarket(bot) {
   isRunning = true;
 
   try {
-    const data = await getMarketData();
+    const data = await getMarketData({
+      forceRefresh: true,
+    });
 
     addMarketSnapshot(data);
 
     await checkAlerts(bot, data);
-
   } catch (error) {
     console.error(
       "Market monitor error:",
@@ -29,7 +32,7 @@ async function updateMarket(bot) {
   }
 }
 
-function startMarketMonitor(bot, interval = 60000) {
+function startMarketMonitor(bot, interval = DEFAULT_INTERVAL) {
   if (monitorInterval) {
     return;
   }
@@ -48,7 +51,6 @@ function stopMarketMonitor() {
 
   clearInterval(monitorInterval);
   monitorInterval = null;
-
 }
 
 module.exports = {

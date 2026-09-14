@@ -1,7 +1,35 @@
 const axios = require("axios");
-const { brsApiKey, brsApiUrl } = require("../config");
 
-async function getMarketData() {
+const { brsApiKey, brsApiUrl } = require("../config");
+const {
+  getCachedMarketData,
+  setCachedMarketData,
+} = require("./market-cache.service");
+const {
+  canMakeRequest,
+  recordRequest,
+  getUsageStatus,
+} = require("./api-usage.service");
+
+async function getMarketData(options = {}) {
+  const { forceRefresh = false } = options;
+
+  if (!forceRefresh) {
+    const cachedData = getCachedMarketData();
+
+    if (cachedData) {
+      return cachedData;
+    }
+  }
+
+  if (!canMakeRequest()) {
+    const usage = getUsageStatus();
+
+    throw new Error(
+      `BRSAPI usage limit reached: ${usage.requests}/${usage.limit}`,
+    );
+  }
+
   const response = await axios.get(brsApiUrl, {
     params: {
       key: brsApiKey,
@@ -12,6 +40,9 @@ async function getMarketData() {
   if (!response.data) {
     throw new Error("Market data is empty");
   }
+
+  recordRequest();
+  setCachedMarketData(response.data);
 
   return response.data;
 }

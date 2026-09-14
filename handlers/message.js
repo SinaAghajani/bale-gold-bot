@@ -1,6 +1,6 @@
-const axios = require("axios");
-const { brsApiKey, brsApiUrl } = require("../config");
 const { analyzeMarket } = require("../services/ai.service");
+const { getMarketData } = require("../services/market.service");
+const { getAllHistory } = require("../services/history.service");
 const { startCalculator, handleCalculator } = require("./calculator");
 const {
   startAlert,
@@ -10,7 +10,6 @@ const {
 } = require("./alert");
 const { startHistory, handleHistory } = require("./history");
 const { handleStart } = require("./start");
-const { getAllHistory } = require("../services/history.service");
 
 function formatNumber(value) {
   if (value === undefined || value === null) {
@@ -36,26 +35,14 @@ function findItem(items, symbol) {
   return items?.find((item) => item.symbol === symbol);
 }
 
-async function getMarketData() {
-  const response = await axios.get(brsApiUrl, {
-    params: {
-      key: brsApiKey,
-    },
-    timeout: 10000,
-  });
-
-  return response.data;
-}
-
 function createPriceLine(item) {
   if (!item) {
     return "❌ اطلاعات در دسترس نیست";
   }
 
-  return `💰 ${formatNumber(item.price)} ${item.unit}\n${formatChange(
-    item.change_value,
-    item.change_percent,
-  )}`;
+  return `💰 ${formatNumber(item.price)} ${
+    item.unit || "تومان"
+  }\n${formatChange(item.change_value, item.change_percent)}`;
 }
 
 function getAllMarketItems(data) {
@@ -270,6 +257,26 @@ ${usd?.date || gold18?.date || "-"} | ${usd?.time || gold18?.time || "-"}
   await bot.sendMessage(chatId, text);
 }
 
+async function handleMarketRequest(
+  bot,
+  chatId,
+  loadingText,
+  handler,
+  errorText,
+  errorLabel,
+) {
+  await bot.sendMessage(chatId, loadingText);
+
+  try {
+    const data = await getMarketData();
+    await handler(bot, chatId, data);
+  } catch (error) {
+    console.error(`${errorLabel}:`, error.response?.data || error.message);
+
+    await bot.sendMessage(chatId, errorText);
+  }
+}
+
 async function handleMessage(bot, message) {
   const chatId = message.chat.id;
   const text = message.text?.trim();
@@ -301,12 +308,7 @@ async function handleMessage(bot, message) {
     return;
   }
 
-  if (text === "🔔 هشدار قیمت") {
-    await startAlert(bot, chatId);
-    return;
-  }
-
-  if (text === "🔔 ثبت هشدار") {
+  if (text === "🔔 هشدار قیمت" || text === "🔔 ثبت هشدار") {
     await startAlert(bot, chatId);
     return;
   }
@@ -327,79 +329,53 @@ async function handleMessage(bot, message) {
   }
 
   if (text === "🥇 قیمت طلا") {
-    await bot.sendMessage(chatId, "⏳ در حال دریافت آخرین قیمت‌های طلا...");
-
-    try {
-      const data = await getMarketData();
-      await sendGoldPrices(bot, chatId, data);
-    } catch (error) {
-      console.error("Gold API error:", error.response?.data || error.message);
-
-      await bot.sendMessage(
-        chatId,
-        "❌ دریافت قیمت طلا با خطا مواجه شد.\nلطفاً چند لحظه دیگر دوباره تلاش کنید.",
-      );
-    }
+    await handleMarketRequest(
+      bot,
+      chatId,
+      "⏳ در حال دریافت آخرین قیمت‌های طلا...",
+      sendGoldPrices,
+      "❌ دریافت قیمت طلا با خطا مواجه شد.\nلطفاً چند لحظه دیگر دوباره تلاش کنید.",
+      "Gold market error",
+    );
 
     return;
   }
 
   if (text === "🪙 قیمت سکه") {
-    await bot.sendMessage(chatId, "⏳ در حال دریافت آخرین قیمت‌های سکه...");
-
-    try {
-      const data = await getMarketData();
-      await sendCoinPrices(bot, chatId, data);
-    } catch (error) {
-      console.error("Coin API error:", error.response?.data || error.message);
-
-      await bot.sendMessage(
-        chatId,
-        "❌ دریافت قیمت سکه با خطا مواجه شد.\nلطفاً چند لحظه دیگر دوباره تلاش کنید.",
-      );
-    }
+    await handleMarketRequest(
+      bot,
+      chatId,
+      "⏳ در حال دریافت آخرین قیمت‌های سکه...",
+      sendCoinPrices,
+      "❌ دریافت قیمت سکه با خطا مواجه شد.\nلطفاً چند لحظه دیگر دوباره تلاش کنید.",
+      "Coin market error",
+    );
 
     return;
   }
 
   if (text === "💵 قیمت ارز") {
-    await bot.sendMessage(chatId, "⏳ در حال دریافت آخرین قیمت‌های ارز...");
-
-    try {
-      const data = await getMarketData();
-      await sendCurrencyPrices(bot, chatId, data);
-    } catch (error) {
-      console.error(
-        "Currency API error:",
-        error.response?.data || error.message,
-      );
-
-      await bot.sendMessage(
-        chatId,
-        "❌ دریافت قیمت ارز با خطا مواجه شد.\nلطفاً چند لحظه دیگر دوباره تلاش کنید.",
-      );
-    }
+    await handleMarketRequest(
+      bot,
+      chatId,
+      "⏳ در حال دریافت آخرین قیمت‌های ارز...",
+      sendCurrencyPrices,
+      "❌ دریافت قیمت ارز با خطا مواجه شد.\nلطفاً چند لحظه دیگر دوباره تلاش کنید.",
+      "Currency market error",
+    );
 
     return;
   }
 
   if (text === "📊 وضعیت بازار") {
-    await bot.sendMessage(chatId, "⏳ در حال تحلیل وضعیت بازار...");
-
-    try {
-      const data = await getMarketData();
-      await sendMarketStatus(bot, chatId, data);
-    } catch (error) {
-      console.error(
-        "Market status API error:",
-        error.response?.data || error.message,
-      );
-
-      await bot.sendMessage(
-        chatId,
-        "❌ دریافت وضعیت بازار با خطا مواجه شد.\nلطفاً چند لحظه دیگر دوباره تلاش کنید.",
-      );
-    }
+    await handleMarketRequest(
+      bot,
+      chatId,
+      "⏳ در حال تحلیل وضعیت بازار...",
+      sendMarketStatus,
+      "❌ دریافت وضعیت بازار با خطا مواجه شد.\nلطفاً چند لحظه دیگر دوباره تلاش کنید.",
+      "Market status error",
+    );
 
     return;
   }
@@ -438,19 +414,14 @@ async function handleMessage(bot, message) {
   }
 
   if (text === "🔄 بروزرسانی قیمت‌ها") {
-    await bot.sendMessage(chatId, "🔄 در حال دریافت آخرین قیمت‌های بازار...");
-
-    try {
-      const data = await getMarketData();
-      await sendMarketRefresh(bot, chatId, data);
-    } catch (error) {
-      console.error("Market API error:", error.response?.data || error.message);
-
-      await bot.sendMessage(
-        chatId,
-        "❌ بروزرسانی قیمت‌ها انجام نشد.\nلطفاً چند لحظه دیگر دوباره تلاش کنید.",
-      );
-    }
+    await handleMarketRequest(
+      bot,
+      chatId,
+      "🔄 در حال دریافت آخرین قیمت‌های بازار...",
+      sendMarketRefresh,
+      "❌ بروزرسانی قیمت‌ها انجام نشد.\nلطفاً چند لحظه دیگر دوباره تلاش کنید.",
+      "Market refresh error",
+    );
 
     return;
   }

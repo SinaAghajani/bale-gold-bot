@@ -20,11 +20,13 @@ function loadAlerts() {
 
   try {
     const content = fs.readFileSync(ALERTS_FILE, "utf8");
+
     const alerts = JSON.parse(content);
 
     return Array.isArray(alerts) ? alerts : [];
   } catch (error) {
     console.error("Alerts load error:", error.message);
+
     return [];
   }
 }
@@ -32,26 +34,44 @@ function loadAlerts() {
 function saveAlerts(alerts) {
   ensureStorage();
 
-  fs.writeFileSync(ALERTS_FILE, JSON.stringify(alerts, null, 2), "utf8");
+  const temporaryFile = `${ALERTS_FILE}.tmp`;
+
+  fs.writeFileSync(temporaryFile, JSON.stringify(alerts, null, 2), "utf8");
+
+  fs.renameSync(temporaryFile, ALERTS_FILE);
 }
 
 function createAlert(chatId, symbol, name, targetPrice, currentPrice) {
   const alerts = loadAlerts();
 
-  const direction = targetPrice > currentPrice ? "above" : "below";
+  const normalizedTarget = Number(targetPrice);
+
+  const normalizedCurrent = Number(currentPrice);
+
+  if (
+    !Number.isFinite(normalizedTarget) ||
+    !Number.isFinite(normalizedCurrent) ||
+    normalizedTarget <= 0 ||
+    normalizedCurrent <= 0
+  ) {
+    throw new Error("Invalid alert price");
+  }
+
+  const direction = normalizedTarget > normalizedCurrent ? "above" : "below";
 
   const alert = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     chatId: String(chatId),
     symbol,
     name,
-    targetPrice,
-    currentPrice,
+    targetPrice: normalizedTarget,
+    currentPrice: normalizedCurrent,
     direction,
     createdAt: new Date().toISOString(),
   };
 
   alerts.push(alert);
+
   saveAlerts(alerts);
 
   return alert;
@@ -86,11 +106,37 @@ function deleteUserAlert(chatId, index) {
 }
 
 function checkCondition(alert, currentPrice) {
-  if (alert.direction === "above") {
-    return currentPrice >= alert.targetPrice;
+  const price = Number(currentPrice);
+
+  const target = Number(alert.targetPrice);
+
+  if (!Number.isFinite(price) || !Number.isFinite(target)) {
+    return false;
   }
 
-  return currentPrice <= alert.targetPrice;
+  if (alert.direction === "above") {
+    return price >= target;
+  }
+
+  if (alert.direction === "below") {
+    return price <= target;
+  }
+
+  return false;
+}
+
+function findMarketItem(data, symbol) {
+  const items = [
+    ...(data.gold || []),
+    ...(data.currency || []),
+    ...(data.cryptocurrency || []),
+  ];
+
+  return items.find((item) => item.symbol === symbol) || null;
+}
+
+function formatPrice(value) {
+  return Number(value).toLocaleString("fa-IR");
 }
 
 async function checkAlerts(bot, data) {
@@ -103,32 +149,26 @@ async function checkAlerts(bot, data) {
   const remainingAlerts = [];
 
   for (const alert of alerts) {
-    const items = [
-      ...(data.gold || []),
-      ...(data.currency || []),
-      ...(data.cryptocurrency || []),
-    ];
+    const item = findMarketItem(data, alert.symbol);
 
-    const item = items.find((marketItem) => marketItem.symbol === alert.symbol);
-
-    if (!item || typeof item.price !== "number") {
+    if (!item || !Number.isFinite(Number(item.price))) {
       remainingAlerts.push(alert);
+
       continue;
     }
 
-    const triggered = checkCondition(alert, Number(item.price));
+    const currentPrice = Number(item.price);
+
+    const triggered = checkCondition(alert, currentPrice);
 
     if (!triggered) {
       remainingAlerts.push(alert);
+
       continue;
     }
 
     const conditionText =
       alert.direction === "above" ? "به بالاتر از" : "به پایین‌تر از";
-
-    const currentPrice = Number(item.price).toLocaleString("fa-IR");
-
-    const targetPrice = Number(alert.targetPrice).toLocaleString("fa-IR");
 
     const text = `
 🔔 هشدار قیمت فعال شد
@@ -136,10 +176,10 @@ async function checkAlerts(bot, data) {
 ${alert.name}
 
 💰 قیمت فعلی:
-${currentPrice} ${item.unit || "تومان"}
+${formatPrice(currentPrice)} ${item.unit || "تومان"}
 
 🎯 قیمت هدف:
-${targetPrice} ${item.unit || "تومان"}
+${formatPrice(alert.targetPrice)} ${item.unit || "تومان"}
 
 📈 قیمت ${conditionText} محدوده تعیین‌شده رسید.
 `;

@@ -39,6 +39,15 @@ function createAlertMenu() {
       [{ text: "↩️ بازگشت" }],
     ],
     resize_keyboard: true,
+    is_persistent: true,
+  };
+}
+
+function createCancelMenu() {
+  return {
+    keyboard: [[{ text: "❌ لغو عملیات" }]],
+    resize_keyboard: true,
+    one_time_keyboard: false,
   };
 }
 
@@ -48,10 +57,18 @@ function createAssetMenu() {
       [{ text: "🥇 طلای ۱۸ عیار" }],
       [{ text: "🪙 سکه امامی" }],
       [{ text: "💵 دلار" }],
-      [{ text: "❌ لغو" }],
+      [{ text: "❌ لغو عملیات" }],
     ],
     resize_keyboard: true,
-    one_time_keyboard: true,
+    one_time_keyboard: false,
+  };
+}
+
+function createKaratLikeInputMenu() {
+  return {
+    keyboard: [[{ text: "❌ لغو عملیات" }]],
+    resize_keyboard: true,
+    one_time_keyboard: false,
   };
 }
 
@@ -81,7 +98,7 @@ function createAlertSymbol(text) {
 }
 
 async function startAlert(bot, chatId) {
-  alertSessions.set(chatId, {
+  alertSessions.set(String(chatId), {
     step: "asset",
   });
 
@@ -153,7 +170,7 @@ async function startDeleteAlert(bot, chatId) {
       `${index + 1}️⃣ ${alert.name} — ${formatNumber(alert.targetPrice)} تومان`,
   );
 
-  alertSessions.set(chatId, {
+  alertSessions.set(String(chatId), {
     step: "delete",
   });
 
@@ -167,31 +184,28 @@ async function startDeleteAlert(bot, chatId) {
 ${lines.join("\n")}
 `,
     {
-      reply_markup: {
-        keyboard: [[{ text: "❌ لغو" }]],
-        resize_keyboard: true,
-        one_time_keyboard: true,
-      },
+      reply_markup: createCancelMenu(),
     },
   );
 }
 
 async function handleAlert(bot, message) {
   const chatId = message.chat.id;
+  const chatKey = String(chatId);
   const text = message.text?.trim();
 
   if (!text) {
     return false;
   }
 
-  const session = alertSessions.get(chatId);
+  const session = alertSessions.get(chatKey);
 
   if (!session) {
     return false;
   }
 
-  if (text === "❌ لغو") {
-    alertSessions.delete(chatId);
+  if (text === "❌ لغو عملیات" || text === "❌ لغو" || text === "/cancel") {
+    alertSessions.delete(chatKey);
 
     await bot.sendMessage(chatId, "❌ عملیات هشدار لغو شد.", {
       reply_markup: createAlertMenu(),
@@ -206,7 +220,10 @@ async function handleAlert(bot, message) {
     if (!asset) {
       await bot.sendMessage(
         chatId,
-        "لطفاً یکی از دارایی‌های نمایش‌داده‌شده را انتخاب کنید.",
+        "❌ لطفاً یکی از دارایی‌های نمایش‌داده‌شده را انتخاب کنید.",
+        {
+          reply_markup: createAssetMenu(),
+        },
       );
 
       return true;
@@ -214,6 +231,7 @@ async function handleAlert(bot, message) {
 
     try {
       const data = await getMarketData();
+
       const item = getItemBySymbol(data, asset.symbol);
 
       if (!item || typeof item.price !== "number") {
@@ -225,11 +243,12 @@ async function handleAlert(bot, message) {
           },
         );
 
-        alertSessions.delete(chatId);
+        alertSessions.delete(chatKey);
+
         return true;
       }
 
-      alertSessions.set(chatId, {
+      alertSessions.set(chatKey, {
         step: "target",
         symbol: asset.symbol,
         name: asset.name,
@@ -249,13 +268,11 @@ ${formatNumber(item.price)} ${item.unit || "تومان"}
 
 مثال:
 24000000
+
+می‌توانید عدد را فارسی یا انگلیسی وارد کنید.
 `,
         {
-          reply_markup: {
-            keyboard: [[{ text: "❌ لغو" }]],
-            resize_keyboard: true,
-            one_time_keyboard: true,
-          },
+          reply_markup: createKaratLikeInputMenu(),
         },
       );
     } catch (error) {
@@ -264,7 +281,7 @@ ${formatNumber(item.price)} ${item.unit || "تومان"}
         error.response?.data || error.message,
       );
 
-      alertSessions.delete(chatId);
+      alertSessions.delete(chatKey);
 
       await bot.sendMessage(chatId, "❌ دریافت قیمت فعلی با خطا مواجه شد.", {
         reply_markup: createAlertMenu(),
@@ -281,6 +298,9 @@ ${formatNumber(item.price)} ${item.unit || "تومان"}
       await bot.sendMessage(
         chatId,
         "❌ قیمت واردشده معتبر نیست.\n\nلطفاً قیمت هدف را به‌صورت عددی وارد کنید.",
+        {
+          reply_markup: createCancelMenu(),
+        },
       );
 
       return true;
@@ -297,6 +317,9 @@ ${formatNumber(session.currentPrice)} ${session.unit}
 
 لطفاً یک قیمت بالاتر یا پایین‌تر وارد کنید.
 `,
+        {
+          reply_markup: createCancelMenu(),
+        },
       );
 
       return true;
@@ -310,7 +333,7 @@ ${formatNumber(session.currentPrice)} ${session.unit}
       session.currentPrice,
     );
 
-    alertSessions.delete(chatId);
+    alertSessions.delete(chatKey);
 
     const condition =
       alert.direction === "above"
@@ -344,15 +367,20 @@ ${condition}
   }
 
   if (session.step === "delete") {
-    const index =
-      Number(
-        String(text)
-          .replace(/[۰-۹]/g, (digit) => "۰۱۲۳۴۵۶۷۸۹".indexOf(digit))
-          .trim(),
-      ) - 1;
+    const normalized = String(text)
+      .replace(/[۰-۹]/g, (digit) => "۰۱۲۳۴۵۶۷۸۹".indexOf(digit))
+      .trim();
+
+    const index = Number(normalized) - 1;
 
     if (!Number.isInteger(index) || index < 0) {
-      await bot.sendMessage(chatId, "❌ شماره هشدار معتبر نیست.");
+      await bot.sendMessage(
+        chatId,
+        "❌ شماره هشدار معتبر نیست.\n\nلطفاً شماره یکی از هشدارهای موجود را وارد کنید.",
+        {
+          reply_markup: createCancelMenu(),
+        },
+      );
 
       return true;
     }
@@ -364,11 +392,12 @@ ${condition}
         reply_markup: createAlertMenu(),
       });
 
-      alertSessions.delete(chatId);
+      alertSessions.delete(chatKey);
+
       return true;
     }
 
-    alertSessions.delete(chatId);
+    alertSessions.delete(chatKey);
 
     await bot.sendMessage(
       chatId,

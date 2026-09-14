@@ -10,9 +10,25 @@ function createHistoryMenu() {
       [{ text: "🥇 طلای ۱۸ عیار" }],
       [{ text: "🪙 سکه امامی" }],
       [{ text: "💵 دلار" }],
-      [{ text: "↩️ بازگشت" }],
+      [{ text: "❌ لغو عملیات" }],
     ],
     resize_keyboard: true,
+    one_time_keyboard: false,
+  };
+}
+
+function getMainMenu() {
+  return {
+    keyboard: [
+      [{ text: "🥇 قیمت طلا" }, { text: "🪙 قیمت سکه" }],
+      [{ text: "💵 قیمت ارز" }],
+      [{ text: "📊 وضعیت بازار" }, { text: "🤖 تحلیل هوشمند بازار" }],
+      [{ text: "🧮 محاسبه قیمت طلا" }],
+      [{ text: "🔔 هشدار قیمت" }, { text: "📅 تاریخچه قیمت" }],
+      [{ text: "🔄 بروزرسانی قیمت‌ها" }],
+    ],
+    resize_keyboard: true,
+    is_persistent: true,
   };
 }
 
@@ -49,8 +65,13 @@ async function startHistory(bot, chatId) {
 
 دارایی موردنظر را انتخاب کنید:
 
+🥇 طلای ۱۸ عیار
+🪙 سکه امامی
+💵 دلار
+
 نکته:
 این بخش بر اساس قیمت‌هایی است که ربات به‌صورت دوره‌ای ثبت کرده است.
+
 هرچه ربات مدت بیشتری فعال باشد، اطلاعات بیشتری در تاریخچه ذخیره می‌شود.
 `,
     {
@@ -60,6 +81,18 @@ async function startHistory(bot, chatId) {
 }
 
 async function showHistory(bot, chatId, text) {
+  if (text === "❌ لغو عملیات") {
+    await bot.sendMessage(chatId, "❌ مشاهده تاریخچه لغو شد.", {
+      reply_markup: getMainMenu(),
+    });
+
+    return true;
+  }
+
+  if (text === "↩️ بازگشت") {
+    return false;
+  }
+
   const config = getHistoryConfig(text);
 
   if (!config) {
@@ -87,15 +120,16 @@ async function showHistory(bot, chatId, text) {
   }
 
   const lines = history.map((record, index) => {
+    const changePercent = Number(record.changePercent) || 0;
+
     const changeIcon =
-      record.changePercent > 0 ? "🟢" : record.changePercent < 0 ? "🔴" : "⚪";
+      changePercent > 0 ? "🟢" : changePercent < 0 ? "🔴" : "⚪";
 
-    const change =
-      record.changePercent > 0
-        ? `+${record.changePercent}`
-        : record.changePercent;
+    const change = changePercent > 0 ? `+${changePercent}` : changePercent;
 
-    return `${index + 1}️⃣ ${formatNumber(record.price)} ${record.unit}
+    return `${index + 1}️⃣ ${formatNumber(
+      record.price,
+    )} ${record.unit || "تومان"}
 ${changeIcon} ${change}٪
 🕐 ${record.date || "-"} | ${record.time || "-"}`;
   });
